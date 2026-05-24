@@ -1,0 +1,21 @@
+[package]
+name = "ecma-parse-cat"
+version = "0.1.0"
+edition = "2024"
+description = "ECMAScript parser consuming ecma-lex-cat tokens and producing ecma-syntax-cat Program ASTs. Comprehensive ES2024 surface (classes, modules, destructuring, async/await, optional chaining, templates). Recursive-descent with precedence climbing."
+license = "MIT OR Apache-2.0"
+keywords = ["ecmascript", "javascript", "parser", "estree", "syntax"]
+categories = ["parser-implementations", "compilers"]
+
+[dependencies]
+ecma-syntax-cat = "0.1"
+ecma-lex-cat = "0.1"
+
+[dev-dependencies]
+proptest = "1"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+needless_pass_by_value = "warn"
+manual_map = "warn"
