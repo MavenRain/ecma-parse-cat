@@ -755,7 +755,21 @@ pub fn parse_binding_pattern(
             }),
         },
     }
-    .and_then(|(pattern, after)| maybe_with_default(tokens, after, pattern))
+}
+
+/// Parse a binding element: a binding pattern optionally followed by a
+/// default value (`= expr`).  Used inside array/object patterns and
+/// formal parameter lists where defaults are part of the binding.
+///
+/// # Errors
+///
+/// See [`Error`].
+pub fn parse_binding_element(
+    tokens: &[Token],
+    pos: usize,
+) -> Result<(ecma_syntax_cat::pattern::Pattern, usize), Error> {
+    let (pattern, after) = parse_binding_pattern(tokens, pos)?;
+    maybe_with_default(tokens, after, pattern)
 }
 
 fn maybe_with_default(
@@ -830,7 +844,7 @@ fn collect_array_pattern(
             after_close,
         ))
     } else {
-        let (pat, after_pat) = parse_binding_pattern(tokens, pos)?;
+        let (pat, after_pat) = parse_binding_element(tokens, pos)?;
         let extended: Vec<Option<ecma_syntax_cat::pattern::Pattern>> =
             acc.into_iter().chain(std::iter::once(Some(pat))).collect();
         if is_kind(tokens, after_pat, &TokenKind::Comma) {
@@ -930,7 +944,7 @@ fn parse_object_pattern_member(
         )
     };
     if is_kind(tokens, after_key, &TokenKind::Colon) {
-        let (value, after_value) = parse_binding_pattern(tokens, after_key + 1)?;
+        let (value, after_value) = parse_binding_element(tokens, after_key + 1)?;
         Ok((
             ecma_syntax_cat::pattern::ObjectPatternMember::Property {
                 key,

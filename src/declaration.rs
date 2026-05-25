@@ -2,7 +2,7 @@
 
 use crate::error::Error;
 use crate::expression::parse_assignment_expression;
-use crate::statement::{parse_binding_pattern, parse_block_body};
+use crate::statement::{parse_binding_element, parse_binding_pattern, parse_block_body};
 use crate::stream::{Peek, expect_identifier, expect_kind, is_kind, peek, span_at};
 use ecma_lex_cat::token::{Token, TokenKind};
 use ecma_syntax_cat::class::{Class, ClassMember, MethodKind};
@@ -121,7 +121,7 @@ fn parse_formal_parameter(tokens: &[Token], pos: usize) -> Result<(Pattern, usiz
             after_inner,
         ))
     } else {
-        parse_binding_pattern(tokens, pos)
+        parse_binding_element(tokens, pos)
     }
 }
 
