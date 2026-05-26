@@ -1,6 +1,6 @@
 [package]
 name = "ecma-parse-cat"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "ECMAScript parser consuming ecma-lex-cat tokens and producing ecma-syntax-cat Program ASTs. Comprehensive ES2024 surface (classes, modules, destructuring, async/await, optional chaining, templates). Recursive-descent with precedence climbing."
 license = "MIT OR Apache-2.0"
