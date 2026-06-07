@@ -1,8 +1,8 @@
 [package]
 name = "ecma-parse-cat"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2024"
-description = "ECMAScript parser consuming ecma-lex-cat tokens and producing ecma-syntax-cat Program ASTs. Comprehensive ES2024 surface (classes, modules, destructuring, async/await, optional chaining, templates). Recursive-descent with precedence climbing."
+description = "ECMAScript parser consuming ecma-lex-cat tokens and producing ecma-syntax-cat Program ASTs. Comprehensive ES2024 surface (classes, modules, destructuring, async/await, optional chaining, templates). Recursive-descent with precedence climbing.  v0.2.0 emits `ObjectPropertyKind::Get` / `Set` / `Method` for accessor and shorthand-method object-literal syntax (`{ get x() {} }`, `{ set x(v) {} }`, `{ foo() {} }`), with `get`/`set` disambiguated by lookahead (followed by another property key -> accessor; followed by `(` -> shorthand method named `get`/`set`; followed by `,` / `}` / `:` -> data property)."
 license = "MIT OR Apache-2.0"
 keywords = ["ecmascript", "javascript", "parser", "estree", "syntax"]
 categories = ["parser-implementations", "compilers"]

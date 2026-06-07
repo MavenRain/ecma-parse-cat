@@ -5,7 +5,7 @@ use crate::pattern::reinterpret_expression_as_arrow_params;
 use crate::precedence::{BinaryInfo, BinaryKind, MIN_PRECEDENCE, assignment_operator, binary_info};
 use crate::stream::{
     Peek, expect_identifier, expect_identifier_or_keyword, expect_kind, expect_private_identifier,
-    is_kind, peek, span_at,
+    is_kind, peek, span_at, span_before,
 };
 use ecma_lex_cat::token::{Token, TokenKind};
 use ecma_syntax_cat::expression::{
@@ -842,6 +842,8 @@ fn parse_object_member(tokens: &[Token], pos: usize) -> Result<(ObjectMember, us
     if is_kind(tokens, pos, &TokenKind::Spread) {
         let (inner, after_inner) = parse_assignment_expression(tokens, pos + 1)?;
         Ok((ObjectMember::Spread { argument: inner }, after_inner))
+    } else if let Some(accessor_kind) = accessor_keyword_followed_by_key(tokens, pos) {
+        parse_accessor_member(tokens, pos + 1, accessor_kind)
     } else {
         let (key, computed, after_key) = parse_property_key(tokens, pos)?;
         if is_kind(tokens, after_key, &TokenKind::Colon) {
@@ -856,6 +858,8 @@ fn parse_object_member(tokens: &[Token], pos: usize) -> Result<(ObjectMember, us
                 },
                 after_value,
             ))
+        } else if is_kind(tokens, after_key, &TokenKind::LParen) {
+            parse_shorthand_method(tokens, after_key, key, computed)
         } else {
             let shorthand_span = span_at(tokens, pos);
             let value = property_key_to_shorthand_value(&key, shorthand_span)?;
@@ -871,6 +875,105 @@ fn parse_object_member(tokens: &[Token], pos: usize) -> Result<(ObjectMember, us
             ))
         }
     }
+}
+
+/// Detect `get`/`set` shorthand at `pos`: the token is the
+/// identifier `get` or `set` AND the following token starts a
+/// property key (`identifier`, `"string"`, `42`, or `[computed]`).
+/// `{ get }` (shorthand init), `{ get: v }` (data property), and
+/// `{ get() {} }` (shorthand method named "get") all return `None`
+/// because the second token is `,`/`}`/`:`/`(` respectively.
+fn accessor_keyword_followed_by_key(tokens: &[Token], pos: usize) -> Option<ObjectPropertyKind> {
+    accessor_keyword(tokens, pos).filter(|_| is_property_key_start(tokens, pos + 1))
+}
+
+fn accessor_keyword(tokens: &[Token], pos: usize) -> Option<ObjectPropertyKind> {
+    match peek(tokens, pos) {
+        Peek::Eof => None,
+        Peek::Token(t) => match t.value() {
+            TokenKind::Identifier(name) => match name.as_str() {
+                "get" => Some(ObjectPropertyKind::Get),
+                "set" => Some(ObjectPropertyKind::Set),
+                _other => None,
+            },
+            _other => None,
+        },
+    }
+}
+
+fn is_property_key_start(tokens: &[Token], pos: usize) -> bool {
+    matches!(peek(tokens, pos), Peek::Token(t) if matches!(
+        t.value(),
+        TokenKind::Identifier(_)
+            | TokenKind::String(_)
+            | TokenKind::Number(_)
+            | TokenKind::LBracket
+    ))
+}
+
+fn parse_accessor_member(
+    tokens: &[Token],
+    pos: usize,
+    kind: ObjectPropertyKind,
+) -> Result<(ObjectMember, usize), Error> {
+    let start_span = span_before(tokens, pos);
+    let (key, computed, after_key) = parse_property_key(tokens, pos)?;
+    let (value, after_body) = parse_method_function(tokens, after_key, start_span)?;
+    Ok((
+        ObjectMember::Property {
+            key,
+            value,
+            kind,
+            computed,
+            shorthand: false,
+        },
+        after_body,
+    ))
+}
+
+fn parse_shorthand_method(
+    tokens: &[Token],
+    pos_at_lparen: usize,
+    key: PropertyKey,
+    computed: bool,
+) -> Result<(ObjectMember, usize), Error> {
+    let start_span = span_before(tokens, pos_at_lparen);
+    let (value, after_body) = parse_method_function(tokens, pos_at_lparen, start_span)?;
+    Ok((
+        ObjectMember::Property {
+            key,
+            value,
+            kind: ObjectPropertyKind::Method,
+            computed,
+            shorthand: false,
+        },
+        after_body,
+    ))
+}
+
+/// Parse the `(params) { body }` tail of a getter / setter /
+/// shorthand-method member into a `FunctionExpression`.  `start_span`
+/// is the position the resulting expression should span from
+/// (typically the `get` / `set` / key token).  No `function` keyword
+/// or method-name binding is consumed -- the caller supplies the key
+/// separately, and the function value itself is anonymous (`id =
+/// None`).  Getter / setter arity (0 / 1 respectively) is not yet
+/// validated here; the engine can reject mismatches at invocation
+/// time if needed.
+fn parse_method_function(
+    tokens: &[Token],
+    pos_at_lparen: usize,
+    start_span: Span,
+) -> Result<(Expression, usize), Error> {
+    let (params, after_params) =
+        crate::declaration::parse_formal_parameters(tokens, pos_at_lparen)?;
+    let (body, after_body) = crate::statement::parse_block_body(tokens, after_params)?;
+    let span = Span::new(start_span.start(), span_at(tokens, after_body - 1).end());
+    let func = ecma_syntax_cat::function::Function::new(None, params, body, false, false);
+    Ok((
+        Expression::new(ExpressionKind::FunctionExpression(Box::new(func)), span),
+        after_body,
+    ))
 }
 
 fn property_key_to_shorthand_value(key: &PropertyKey, span: Span) -> Result<Expression, Error> {

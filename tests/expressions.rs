@@ -2,7 +2,9 @@
 
 use ecma_lex_cat::lex;
 use ecma_parse_cat::{Error, parse_script};
-use ecma_syntax_cat::expression::{ExpressionKind, MemberProperty};
+use ecma_syntax_cat::expression::{
+    ExpressionKind, MemberProperty, ObjectMember, ObjectPropertyKind, PropertyKey,
+};
 use ecma_syntax_cat::operator::{BinaryOperator, LogicalOperator, UnaryOperator};
 use ecma_syntax_cat::program::ProgramKind;
 use ecma_syntax_cat::statement::StatementKind;
@@ -254,4 +256,137 @@ fn parses_template_literal_with_subst() -> Result<(), Error> {
             expected: "template literal with one substitution",
         }),
     }
+}
+
+fn first_object_members(source: &str) -> Result<Vec<ObjectMember>, Error> {
+    match first_expression(source)? {
+        ExpressionKind::Parenthesized { expression } => match expression.value() {
+            ExpressionKind::Object { properties } => Ok(properties.clone()),
+            _other => Err(Error::UnexpectedEof {
+                expected: "parenthesised object literal",
+            }),
+        },
+        ExpressionKind::Object { properties } => Ok(properties),
+        _other => Err(Error::UnexpectedEof {
+            expected: "object literal",
+        }),
+    }
+}
+
+fn member_kind_and_key_name(member: &ObjectMember) -> Option<(ObjectPropertyKind, String)> {
+    match member {
+        ObjectMember::Property { key, kind, .. } => {
+            let name = match key {
+                PropertyKey::Identifier(id) => Some(id.as_str().to_owned()),
+                PropertyKey::String(s) => Some(s.clone()),
+                PropertyKey::Number(_) | PropertyKey::Computed(_) | PropertyKey::Private(_) => None,
+            };
+            name.map(|n| (*kind, n))
+        }
+        ObjectMember::Spread { .. } => None,
+    }
+}
+
+#[test]
+fn parses_getter_member() -> Result<(), Error> {
+    let members = first_object_members("({ get x() { return 1; } });")?;
+    let (kind, name) = members
+        .first()
+        .and_then(member_kind_and_key_name)
+        .ok_or(Error::UnexpectedEof { expected: "getter" })?;
+    (matches!(kind, ObjectPropertyKind::Get) && name == "x")
+        .then_some(())
+        .ok_or(Error::UnexpectedEof { expected: "get x" })
+}
+
+#[test]
+fn parses_setter_member() -> Result<(), Error> {
+    let members = first_object_members("({ set x(v) { } });")?;
+    let (kind, name) = members
+        .first()
+        .and_then(member_kind_and_key_name)
+        .ok_or(Error::UnexpectedEof { expected: "setter" })?;
+    (matches!(kind, ObjectPropertyKind::Set) && name == "x")
+        .then_some(())
+        .ok_or(Error::UnexpectedEof { expected: "set x" })
+}
+
+#[test]
+fn parses_method_member() -> Result<(), Error> {
+    let members = first_object_members("({ greet() { return 1; } });")?;
+    let (kind, name) = members
+        .first()
+        .and_then(member_kind_and_key_name)
+        .ok_or(Error::UnexpectedEof { expected: "method" })?;
+    (matches!(kind, ObjectPropertyKind::Method) && name == "greet")
+        .then_some(())
+        .ok_or(Error::UnexpectedEof {
+            expected: "greet()",
+        })
+}
+
+#[test]
+fn parses_get_as_shorthand_method_when_next_is_lparen() -> Result<(), Error> {
+    // `{ get() {} }` should NOT be a getter (no following key);
+    // it is a shorthand method named "get".
+    let members = first_object_members("({ get() { return 1; } });")?;
+    let (kind, name) =
+        members
+            .first()
+            .and_then(member_kind_and_key_name)
+            .ok_or(Error::UnexpectedEof {
+                expected: "method get",
+            })?;
+    (matches!(kind, ObjectPropertyKind::Method) && name == "get")
+        .then_some(())
+        .ok_or(Error::UnexpectedEof {
+            expected: "shorthand method named get",
+        })
+}
+
+#[test]
+fn parses_get_as_init_when_followed_by_colon() -> Result<(), Error> {
+    // `{ get: 1 }` -- "get" is a property name, not an accessor.
+    let members = first_object_members("({ get: 1 });")?;
+    let (kind, name) = members
+        .first()
+        .and_then(member_kind_and_key_name)
+        .ok_or(Error::UnexpectedEof { expected: "init" })?;
+    (matches!(kind, ObjectPropertyKind::Init) && name == "get")
+        .then_some(())
+        .ok_or(Error::UnexpectedEof {
+            expected: "data property get",
+        })
+}
+
+#[test]
+fn parses_get_as_shorthand_init_when_alone() -> Result<(), Error> {
+    // `{ get }` -- shorthand init referencing variable "get".
+    let members = first_object_members("({ get });")?;
+    let (kind, name) =
+        members
+            .first()
+            .and_then(member_kind_and_key_name)
+            .ok_or(Error::UnexpectedEof {
+                expected: "shorthand init",
+            })?;
+    (matches!(kind, ObjectPropertyKind::Init) && name == "get")
+        .then_some(())
+        .ok_or(Error::UnexpectedEof {
+            expected: "shorthand init get",
+        })
+}
+
+#[test]
+fn parses_combined_get_set_accessor_pair() -> Result<(), Error> {
+    let members = first_object_members("({ get x() { return 1; }, set x(v) { } });")?;
+    (members.len() == 2
+        && member_kind_and_key_name(&members[0])
+            .is_some_and(|(k, n)| matches!(k, ObjectPropertyKind::Get) && n == "x")
+        && member_kind_and_key_name(&members[1])
+            .is_some_and(|(k, n)| matches!(k, ObjectPropertyKind::Set) && n == "x"))
+    .then_some(())
+    .ok_or(Error::UnexpectedEof {
+        expected: "get x followed by set x",
+    })
 }
