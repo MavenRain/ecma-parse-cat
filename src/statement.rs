@@ -69,6 +69,20 @@ fn dispatch_statement(
         TokenKind::Identifier(name) if is_labeled_statement(tokens, pos, name) => {
             parse_labeled(tokens, pos, start_span)
         }
+        TokenKind::Identifier(name)
+            if name == "async" && is_kind(tokens, pos + 1, &TokenKind::KwFunction) =>
+        {
+            // v0.3: top-level `async function foo() { ... }` declaration.
+            // We consume `async` and forward the remaining slice to
+            // the function-declaration parser with `is_async = true`.
+            let (func, after) =
+                crate::declaration::parse_function_declaration_with_async(tokens, pos + 1, true)?;
+            let span = Span::new(start_span.start(), span_at(tokens, after - 1).end());
+            Ok((
+                Statement::new(StatementKind::FunctionDeclaration(func), span),
+                after,
+            ))
+        }
         _other => parse_expression_statement(tokens, pos, start_span),
     }
 }

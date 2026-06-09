@@ -169,6 +169,161 @@ pub fn expect_identifier_or_keyword(
     }
 }
 
+/// Accept any `IdentifierName` per ECMA-262 §13.3.2 -- regular
+/// identifiers, contextual keywords (`let`, `await`, `yield`,
+/// `static`), AND ordinary reserved words (`catch`, `class`, `if`,
+/// `return`, ...).  Used in member-access positions like
+/// `obj.catch` / `p.then` / `obj.if` where reserved words are
+/// permitted by the grammar.
+///
+/// # Errors
+///
+/// Returns [`Error::UnexpectedToken`] when the token isn't a
+/// keyword or identifier (e.g. `.42` or `."str"`).
+pub fn expect_member_name(tokens: &[Token], pos: usize) -> Result<(Identifier, usize), Error> {
+    match peek(tokens, pos) {
+        Peek::Eof => Err(Error::UnexpectedEof {
+            expected: "member name",
+        }),
+        Peek::Token(tok) => match member_name_text(tok.value()) {
+            Some(text) => Ok((Identifier::new(text)?, pos + 1)),
+            None => Err(Error::UnexpectedToken {
+                at: tok.span(),
+                expected: "member name",
+                found: format!("{}", tok.value()),
+            }),
+        },
+    }
+}
+
+fn member_name_text(kind: &TokenKind) -> Option<String> {
+    identifier_text(kind).or_else(|| reserved_keyword_text(kind))
+}
+
+#[allow(clippy::too_many_lines)] // exhaustive enumeration over the reserved-word TokenKind variants
+fn reserved_keyword_text(kind: &TokenKind) -> Option<String> {
+    match kind {
+        TokenKind::KwBreak => Some("break".to_owned()),
+        TokenKind::KwCase => Some("case".to_owned()),
+        TokenKind::KwCatch => Some("catch".to_owned()),
+        TokenKind::KwClass => Some("class".to_owned()),
+        TokenKind::KwConst => Some("const".to_owned()),
+        TokenKind::KwContinue => Some("continue".to_owned()),
+        TokenKind::KwDebugger => Some("debugger".to_owned()),
+        TokenKind::KwDefault => Some("default".to_owned()),
+        TokenKind::KwDelete => Some("delete".to_owned()),
+        TokenKind::KwDo => Some("do".to_owned()),
+        TokenKind::KwElse => Some("else".to_owned()),
+        TokenKind::KwEnum => Some("enum".to_owned()),
+        TokenKind::KwExport => Some("export".to_owned()),
+        TokenKind::KwExtends => Some("extends".to_owned()),
+        TokenKind::KwFalse => Some("false".to_owned()),
+        TokenKind::KwFinally => Some("finally".to_owned()),
+        TokenKind::KwFor => Some("for".to_owned()),
+        TokenKind::KwFunction => Some("function".to_owned()),
+        TokenKind::KwIf => Some("if".to_owned()),
+        TokenKind::KwImport => Some("import".to_owned()),
+        TokenKind::KwIn => Some("in".to_owned()),
+        TokenKind::KwInstanceof => Some("instanceof".to_owned()),
+        TokenKind::KwNew => Some("new".to_owned()),
+        TokenKind::KwNull => Some("null".to_owned()),
+        TokenKind::KwReturn => Some("return".to_owned()),
+        TokenKind::KwSuper => Some("super".to_owned()),
+        TokenKind::KwSwitch => Some("switch".to_owned()),
+        TokenKind::KwThis => Some("this".to_owned()),
+        TokenKind::KwThrow => Some("throw".to_owned()),
+        TokenKind::KwTrue => Some("true".to_owned()),
+        TokenKind::KwTry => Some("try".to_owned()),
+        TokenKind::KwTypeof => Some("typeof".to_owned()),
+        TokenKind::KwVar => Some("var".to_owned()),
+        TokenKind::KwVoid => Some("void".to_owned()),
+        TokenKind::KwWhile => Some("while".to_owned()),
+        TokenKind::KwWith => Some("with".to_owned()),
+        TokenKind::KwImplements => Some("implements".to_owned()),
+        TokenKind::KwInterface => Some("interface".to_owned()),
+        TokenKind::KwPackage => Some("package".to_owned()),
+        TokenKind::KwPrivate => Some("private".to_owned()),
+        TokenKind::KwProtected => Some("protected".to_owned()),
+        TokenKind::KwPublic => Some("public".to_owned()),
+        // Everything `identifier_text` already handles (and a
+        // handful of leftover token shapes) returns None here so
+        // `member_name_text`'s `.or_else` only ever combines the
+        // contextual-keyword and reserved-keyword strings.
+        TokenKind::Identifier(_)
+        | TokenKind::KwLet
+        | TokenKind::KwAwait
+        | TokenKind::KwYield
+        | TokenKind::KwStatic
+        | TokenKind::PrivateIdentifier(_)
+        | TokenKind::Number(_)
+        | TokenKind::BigInt(_)
+        | TokenKind::String(_)
+        | TokenKind::RegExp { .. }
+        | TokenKind::TemplateNoSubstitution(_)
+        | TokenKind::TemplateHead(_)
+        | TokenKind::TemplateMiddle(_)
+        | TokenKind::TemplateTail(_)
+        | TokenKind::LParen
+        | TokenKind::RParen
+        | TokenKind::LBracket
+        | TokenKind::RBracket
+        | TokenKind::LBrace
+        | TokenKind::RBrace
+        | TokenKind::Comma
+        | TokenKind::Semicolon
+        | TokenKind::Colon
+        | TokenKind::Dot
+        | TokenKind::OptionalChain
+        | TokenKind::Spread
+        | TokenKind::Arrow
+        | TokenKind::Question
+        | TokenKind::EqEq
+        | TokenKind::EqEqEq
+        | TokenKind::BangEq
+        | TokenKind::BangEqEq
+        | TokenKind::Lt
+        | TokenKind::LtEq
+        | TokenKind::Gt
+        | TokenKind::GtEq
+        | TokenKind::Plus
+        | TokenKind::Minus
+        | TokenKind::Star
+        | TokenKind::Slash
+        | TokenKind::Percent
+        | TokenKind::StarStar
+        | TokenKind::PlusPlus
+        | TokenKind::MinusMinus
+        | TokenKind::Amp
+        | TokenKind::Pipe
+        | TokenKind::Caret
+        | TokenKind::Tilde
+        | TokenKind::LtLt
+        | TokenKind::GtGt
+        | TokenKind::GtGtGt
+        | TokenKind::AmpAmp
+        | TokenKind::PipePipe
+        | TokenKind::QQ
+        | TokenKind::Bang
+        | TokenKind::Eq
+        | TokenKind::PlusEq
+        | TokenKind::MinusEq
+        | TokenKind::StarEq
+        | TokenKind::SlashEq
+        | TokenKind::PercentEq
+        | TokenKind::StarStarEq
+        | TokenKind::LtLtEq
+        | TokenKind::GtGtEq
+        | TokenKind::GtGtGtEq
+        | TokenKind::AmpEq
+        | TokenKind::PipeEq
+        | TokenKind::CaretEq
+        | TokenKind::AmpAmpEq
+        | TokenKind::PipePipeEq
+        | TokenKind::QQEq
+        | TokenKind::Eof => None,
+    }
+}
+
 #[allow(clippy::too_many_lines)] // exhaustive enumeration over the ~110 TokenKind variants
 #[allow(clippy::match_same_arms)] // all non-identifier arms intentionally return None, grouped by category for documentation
 fn identifier_text(kind: &TokenKind) -> Option<String> {

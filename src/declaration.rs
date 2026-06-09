@@ -20,6 +20,22 @@ pub fn parse_function_declaration(
     tokens: &[Token],
     pos: usize,
 ) -> Result<(Function, usize), Error> {
+    parse_function_declaration_with_async(tokens, pos, false)
+}
+
+/// v0.3: parse a (possibly async) function declaration.  Called by
+/// `parse_function_declaration` (synchronous) and by the
+/// statement-level `async function foo()` dispatch in
+/// [`crate::statement`].
+///
+/// # Errors
+///
+/// See [`Error`].
+pub fn parse_function_declaration_with_async(
+    tokens: &[Token],
+    pos: usize,
+    is_async: bool,
+) -> Result<(Function, usize), Error> {
     let after_kw = expect_kind(tokens, pos, &TokenKind::KwFunction, "keyword `function`")?;
     let (is_generator, after_star) = if is_kind(tokens, after_kw, &TokenKind::Star) {
         (true, after_kw + 1)
@@ -30,7 +46,7 @@ pub fn parse_function_declaration(
     let (params, after_params) = parse_formal_parameters(tokens, after_id)?;
     let (body, after_body) = parse_block_body(tokens, after_params)?;
     Ok((
-        Function::new(Some(id), params, body, false, is_generator),
+        Function::new(Some(id), params, body, is_async, is_generator),
         after_body,
     ))
 }

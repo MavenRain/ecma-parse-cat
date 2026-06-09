@@ -1,8 +1,8 @@
 [package]
 name = "ecma-parse-cat"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
-description = "ECMAScript parser consuming ecma-lex-cat tokens and producing ecma-syntax-cat Program ASTs. Comprehensive ES2024 surface (classes, modules, destructuring, async/await, optional chaining, templates). Recursive-descent with precedence climbing.  v0.2.0 emits `ObjectPropertyKind::Get` / `Set` / `Method` for accessor and shorthand-method object-literal syntax (`{ get x() {} }`, `{ set x(v) {} }`, `{ foo() {} }`), with `get`/`set` disambiguated by lookahead (followed by another property key -> accessor; followed by `(` -> shorthand method named `get`/`set`; followed by `,` / `}` / `:` -> data property)."
+description = "ECMAScript parser consuming ecma-lex-cat tokens and producing ecma-syntax-cat Program ASTs. Comprehensive ES2024 surface (classes, modules, destructuring, async/await, optional chaining, templates).  v0.3.0 clears three async-syntax workarounds: (1) `obj.catch` and other reserved-word `IdentifierName`s now parse in member-access position via a new `expect_member_name` that covers all reserved words; (2) async arrow forms `async (a, b) => body`, `async x => body`, and `async () => body` parse via cover-grammar refinement on `async(args)` call expressions; (3) top-level `async function foo() { ... }` declarations dispatch to a new `parse_function_declaration_with_async` helper."
 license = "MIT OR Apache-2.0"
 keywords = ["ecmascript", "javascript", "parser", "estree", "syntax"]
 categories = ["parser-implementations", "compilers"]

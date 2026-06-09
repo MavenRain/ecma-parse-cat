@@ -4,8 +4,8 @@ use crate::error::Error;
 use crate::pattern::reinterpret_expression_as_arrow_params;
 use crate::precedence::{BinaryInfo, BinaryKind, MIN_PRECEDENCE, assignment_operator, binary_info};
 use crate::stream::{
-    Peek, expect_identifier, expect_identifier_or_keyword, expect_kind, expect_private_identifier,
-    is_kind, peek, span_at, span_before,
+    Peek, expect_identifier, expect_identifier_or_keyword, expect_kind, expect_member_name,
+    expect_private_identifier, is_kind, peek, span_at, span_before,
 };
 use ecma_lex_cat::token::{Token, TokenKind};
 use ecma_syntax_cat::expression::{
@@ -74,8 +74,24 @@ pub fn parse_assignment_expression(
 fn parse_assignment_tail(tokens: &[Token], pos: usize) -> Result<(Expression, usize), Error> {
     let (left, after_left) = parse_conditional_expression(tokens, pos)?;
     if is_kind(tokens, after_left, &TokenKind::Arrow) {
-        let params = reinterpret_expression_as_arrow_params(left)?;
-        finish_arrow(tokens, after_left + 1, params, false, span_at(tokens, pos))
+        // v0.3: `async (a, b) => ...` is parsed by
+        // `parse_conditional_expression` as a call expression
+        // (`async(a, b)`); when an arrow follows we extract the
+        // call's arguments as arrow parameters and mark the arrow
+        // async.  Falls through to the synchronous arrow path
+        // otherwise.
+        let async_params = try_async_call_as_arrow_params(&left)?;
+        let (params, is_async) = async_params.map_or_else(
+            || reinterpret_expression_as_arrow_params(left).map(|p| (p, false)),
+            |p| Ok((p, true)),
+        )?;
+        finish_arrow(
+            tokens,
+            after_left + 1,
+            params,
+            is_async,
+            span_at(tokens, pos),
+        )
     } else if let Some(op) = peek_assignment_operator(tokens, after_left) {
         let (right, after_right) = parse_assignment_expression(tokens, after_left + 1)?;
         let span = combined_span(left.span(), right.span());
@@ -121,9 +137,90 @@ fn try_parse_arrow_starter(
     } else if is_async_function(tokens, pos) {
         let after_async = pos + 1;
         parse_function_expression(tokens, after_async, true).map(Some)
+    } else if is_async_single_param_arrow(tokens, pos) {
+        // v0.3: `async ident => body` -- one-parameter async arrow.
+        // The two-token lookahead at `is_async_single_param_arrow`
+        // already confirmed `async` + identifier + `=>` so we can
+        // build the pattern directly here.
+        parse_async_single_param_arrow(tokens, pos).map(Some)
     } else {
         Ok(None)
     }
+}
+
+fn is_async_single_param_arrow(tokens: &[Token], pos: usize) -> bool {
+    let is_async = matches!(
+        peek(tokens, pos),
+        Peek::Token(t) if matches!(t.value(), TokenKind::Identifier(name) if name == "async")
+    );
+    let is_ident_after = matches!(
+        peek(tokens, pos + 1),
+        Peek::Token(t) if matches!(t.value(), TokenKind::Identifier(_))
+    );
+    let is_arrow_after = is_kind(tokens, pos + 2, &TokenKind::Arrow);
+    is_async && is_ident_after && is_arrow_after
+}
+
+fn parse_async_single_param_arrow(
+    tokens: &[Token],
+    pos: usize,
+) -> Result<(Expression, usize), Error> {
+    let start_span = span_at(tokens, pos);
+    let (param_id, after_param) = expect_identifier(tokens, pos + 1)?;
+    let param_span = span_before(tokens, after_param);
+    let after_arrow = expect_kind(tokens, after_param, &TokenKind::Arrow, "`=>`")?;
+    let pattern = ecma_syntax_cat::pattern::Pattern::new(
+        ecma_syntax_cat::pattern::PatternKind::Identifier(param_id),
+        param_span,
+    );
+    finish_arrow(tokens, after_arrow, vec![pattern], true, start_span)
+}
+
+/// v0.3: if `expr` is a call expression `async(a, b, ...)` (i.e.
+/// the callee is the bare identifier `async`), return its arguments
+/// reinterpreted as arrow parameters.  Used by `parse_assignment_tail`
+/// to recognise `async (a, b) => ...` after the conditional
+/// expression already consumed the call form.  Returns `Ok(None)`
+/// when `expr` isn't this shape (the caller falls through to the
+/// synchronous arrow path).
+fn try_async_call_as_arrow_params(expr: &Expression) -> Result<Option<Vec<Pattern>>, Error> {
+    let async_args = async_call_arguments(expr);
+    async_args
+        .map(|arguments| {
+            arguments
+                .iter()
+                .map(|arg| reinterpret_expression_as_arrow_params(arg.clone()).map(into_singleton))
+                .collect::<Result<Vec<_>, _>>()
+                .map(|nested| nested.into_iter().flatten().collect())
+        })
+        .transpose()
+}
+
+/// Return the argument list when `expr` is a call whose callee is
+/// the bare identifier `async`.  Used by
+/// [`try_async_call_as_arrow_params`] as the predicate half of the
+/// `async (a, b) =>` cover-grammar refinement.
+fn async_call_arguments(expr: &Expression) -> Option<&Vec<Expression>> {
+    if let ExpressionKind::Call {
+        callee, arguments, ..
+    } = expr.value()
+    {
+        if let ExpressionKind::Identifier(id) = callee.value() {
+            if id.as_str() == "async" {
+                Some(arguments)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+fn into_singleton(patterns: Vec<Pattern>) -> Vec<Pattern> {
+    patterns
 }
 
 fn is_empty_paren_arrow(tokens: &[Token], pos: usize) -> bool {
@@ -490,7 +587,7 @@ fn parse_member_tail(
     base: Expression,
 ) -> Result<(Expression, usize), Error> {
     if is_kind(tokens, pos, &TokenKind::Dot) {
-        let (name, after_name) = expect_identifier_or_keyword(tokens, pos + 1)?;
+        let (name, after_name) = expect_member_name(tokens, pos + 1)?;
         let span = Span::new(base.span().start(), span_at(tokens, after_name - 1).end());
         let member = Expression::new(
             ExpressionKind::Member {
@@ -580,7 +677,7 @@ fn parse_optional_chain(
         let chained = wrap_in_chain(member);
         parse_call_tail(tokens, after_close, chained)
     } else {
-        let (name, after_name) = expect_identifier_or_keyword(tokens, after_qmark)?;
+        let (name, after_name) = expect_member_name(tokens, after_qmark)?;
         let span = Span::new(base.span().start(), span_at(tokens, after_name - 1).end());
         let member = Expression::new(
             ExpressionKind::Member {

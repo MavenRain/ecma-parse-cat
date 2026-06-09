@@ -390,3 +390,127 @@ fn parses_combined_get_set_accessor_pair() -> Result<(), Error> {
         expected: "get x followed by set x",
     })
 }
+
+#[test]
+fn parses_member_access_with_reserved_word() -> Result<(), Error> {
+    // v0.3 allows `obj.catch` / `obj.if` / `obj.return` etc.,
+    // since reserved words are valid IdentifierNames in member
+    // position per ECMA-262 §13.3.2.
+    let kind = first_expression("obj.catch;")?;
+    matches!(
+        &kind,
+        ExpressionKind::Member {
+            property: MemberProperty::Identifier(name),
+            ..
+        } if name.as_str() == "catch"
+    )
+    .then_some(())
+    .ok_or(Error::UnexpectedEof {
+        expected: "member access on reserved word `catch`",
+    })
+}
+
+#[test]
+fn parses_member_access_chain_with_reserved_words() -> Result<(), Error> {
+    let kind = first_expression("a.if.return;")?;
+    matches!(
+        &kind,
+        ExpressionKind::Member {
+            property: MemberProperty::Identifier(name),
+            ..
+        } if name.as_str() == "return"
+    )
+    .then_some(())
+    .ok_or(Error::UnexpectedEof {
+        expected: "chained member access ending in `return`",
+    })
+}
+
+#[test]
+fn parses_async_paren_arrow() -> Result<(), Error> {
+    // v0.3: `async (a, b) => body` reaches the cover-grammar
+    // refinement.  The call form `async(a, b)` followed by `=>`
+    // becomes an async arrow with two params.
+    let kind = first_expression("async (a, b) => a + b;")?;
+    matches!(
+        &kind,
+        ExpressionKind::ArrowFunction(arrow) if arrow.is_async() && arrow.params().len() == 2
+    )
+    .then_some(())
+    .ok_or(Error::UnexpectedEof {
+        expected: "async arrow with two params",
+    })
+}
+
+#[test]
+fn parses_async_single_param_arrow() -> Result<(), Error> {
+    let kind = first_expression("async x => x + 1;")?;
+    matches!(
+        &kind,
+        ExpressionKind::ArrowFunction(arrow) if arrow.is_async() && arrow.params().len() == 1
+    )
+    .then_some(())
+    .ok_or(Error::UnexpectedEof {
+        expected: "async arrow with one param",
+    })
+}
+
+#[test]
+fn parses_async_empty_paren_arrow() -> Result<(), Error> {
+    // The argumentless `async () => ...` form still goes through
+    // the call-form path (`async()` becomes a Call expression
+    // with zero arguments, then `=>` flips it to an async arrow
+    // with no params).
+    let kind = first_expression("async () => 42;")?;
+    matches!(
+        &kind,
+        ExpressionKind::ArrowFunction(arrow) if arrow.is_async() && arrow.params().is_empty()
+    )
+    .then_some(())
+    .ok_or(Error::UnexpectedEof {
+        expected: "async arrow with no params",
+    })
+}
+
+#[test]
+fn async_paren_call_without_arrow_stays_a_call() -> Result<(), Error> {
+    // Sanity: `async(a)` without a trailing `=>` is a regular
+    // function call, not an arrow.
+    let kind = first_expression("async(1, 2);")?;
+    matches!(
+        &kind,
+        ExpressionKind::Call { arguments, .. } if arguments.len() == 2
+    )
+    .then_some(())
+    .ok_or(Error::UnexpectedEof {
+        expected: "regular call when no arrow follows",
+    })
+}
+
+#[test]
+fn parses_async_function_declaration_at_statement_level() -> Result<(), Error> {
+    // v0.3: top-level `async function foo() { ... }` parses as a
+    // FunctionDeclaration with `is_async = true`.
+    use ecma_syntax_cat::statement::StatementKind;
+
+    let tokens = ecma_lex_cat::lex("async function foo() { return 1; }")?;
+    let program = ecma_parse_cat::parse_script(&tokens)?;
+    let body_opt = match program.value() {
+        ProgramKind::Script { body } => Some(body.clone()),
+        ProgramKind::Module { .. } => None,
+    };
+    let body = body_opt.ok_or(Error::UnexpectedEof {
+        expected: "script program",
+    })?;
+    let first = body.first().ok_or(Error::UnexpectedEof {
+        expected: "one statement",
+    })?;
+    matches!(
+        first.value(),
+        StatementKind::FunctionDeclaration(func) if func.is_async()
+    )
+    .then_some(())
+    .ok_or(Error::UnexpectedEof {
+        expected: "async function declaration",
+    })
+}
